@@ -45,8 +45,6 @@ setting_speed = [0,re.compile('^; perimeter_speed = ([0-9]*)')]
 setting_bed_temp = [0,re.compile('^; bed_temperature = ([0-9]*)')]
 setting_temps = [0,re.compile('^; temperature = ([0-9, ]*)')]
 
-
-
 matching_hours = re.compile('([0-9]+)h')
 matching_minutes = re.compile('([0-9]+)m')
 matching_seconds = re.compile('([0-9]+)s')
@@ -60,7 +58,6 @@ header_hex.append(bytes.fromhex("00000000")) # 32bit constant #1 = 0 -> file sta
 header_hex.append(bytes.fromhex("3A000000")) # 32bit constant #2 = 58 -> start of bitmap; 0x10 -> 0x13
 header_hex.append(bytes.fromhex("B0380000")) # 32bit constant #3 = 14512 -> start of gcode; 0x14 -> 0x17
 header_hex.append(bytes.fromhex("B0380000")) # 32bit constant #4 = 14512 -> start of gcode; 0x18 -> 0x1B
-
 
 print_time_in_seconds = 0 #0x1C - 4 bytes
 filament_usage_in_mm_right = 0 #0x20 - 4 bytes
@@ -96,10 +93,45 @@ print_have_started = 0
 
 file = open(input_filename, "r")
 file_data_lines = file.readlines()
-file_data = "".join(line for line in file_data_lines)  #join the whole thing together as a string; I will need this for later
 file.close()
 
-input_file_size = len(file_data_lines) #length of file, in terms of the number of lines.  Don't need to count it out byte-by-byte here...
+# Format the lines as "N[line number] [original line]" for lines without ";" and not empty
+formatted_lines = []
+line_number = 1  # To track the actual line numbers for non-commented lines
+inside_thumbnail_block = False  # Flag to indicate if we are inside the thumbnail block
+
+for line in file_data_lines:
+    stripped_line = line.strip()
+
+    # Check for the start of the thumbnail block
+    if stripped_line == "; THUMBNAIL_BLOCK_START":
+        inside_thumbnail_block = True
+
+    # Check for the end of the thumbnail block
+    elif stripped_line == "; THUMBNAIL_BLOCK_END":
+        inside_thumbnail_block = False
+        continue  # Skip the current line as it is part of the thumbnail block
+
+    # Skip lines if inside the thumbnail block
+    if inside_thumbnail_block:
+        continue
+
+    # Process lines that are not part of the thumbnail block
+    if stripped_line and not stripped_line.startswith(';'):  # Skip lines that are empty or start with ";"
+        formatted_line = f"N{line_number} {stripped_line}"
+        formatted_lines.append(formatted_line)
+        line_number += 1  # Increment the line number only for non-comment and non-empty lines
+    else:
+        formatted_lines.append(stripped_line)  # Keep commented or empty lines as they are
+
+# Reformat lines into one string
+file_data = "\n".join(formatted_lines)
+
+#file_data = "".join(line for line in file_data_lines)  #join the whole thing together as a string; I will need this for later
+#file.close()
+
+input_file_size = len(formatted_lines)
+#input_file_size = len(file_data_lines) #length of file, in terms of the number of lines.  Don't need to count it out byte-by-byte here...
 
 #last_line = 0 #used for deugging purposes; uncomment all of the last_line to learn how often the regex's are being called and where they're located.
 
@@ -130,8 +162,28 @@ for linenumber,line in enumerate(file_data_lines):
             #last_line = linenumber
             image_extract_status = 2
             thumbnail_image = Image.open(BytesIO(base64.decodebytes(thumbnail_b64_content.encode('ascii')))).convert("RGB") #load as image and ensure it is RGB (1 byte per pixel)
+            # Set target dimensions
+            target_width, target_height = 80, 60
+
+            # Get current image size
+            width, height = thumbnail_image.size
+
+            # Step 1: Use thumbnail to resize the image while maintaining the aspect ratio
+            if width > target_width or height > target_height:
+                # The thumbnail method will maintain the aspect ratio
+                new_height = int((target_width / width) * height)
+                thumbnail_image.thumbnail((target_width, new_height))
+
+                # Update width and height after resizing
+                width, height = thumbnail_image.size
+
+            # Step 2: Crop the image if height is larger than 60 pixels
+            if height > target_height:
+                top = (height - target_height) // 2
+                bottom = top + target_height
+                thumbnail_image = thumbnail_image.crop((0, top, target_width, bottom))
             thumbnail_b64_content = "" # clear to save memory
-            thumbnail_bytes = BytesIO()
+            thumbnail_bytes = BytesIO()          
             thumbnail_image.save(thumbnail_bytes, format="BMP")
             thumbnail = thumbnail_bytes.getvalue()
             
