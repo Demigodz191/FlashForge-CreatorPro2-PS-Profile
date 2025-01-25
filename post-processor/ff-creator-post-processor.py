@@ -40,12 +40,10 @@ extruder_mode_match = [0,re.compile('^M109 T([0-9])')] #match for ditto or mirro
 setting_print_time = [0,re.compile(r'^; estimated printing time \(normal mode\) = ([0-9hms ]*)')]
 setting_filament_usage = [0,re.compile(r'^; filament used \[mm\] = ([0-9., ]*)')]
 setting_layer_height = [0,re.compile('^; layer_height = ([0-9. ]*)')]
-setting_shells = [0,re.compile('^; perimeters = ([0-9]*)')]
-setting_speed = [0,re.compile('^; perimeter_speed = ([0-9]*)')]
-setting_bed_temp = [0,re.compile('^; bed_temperature = ([0-9]*)')]
-setting_temps = [0,re.compile('^; temperature = ([0-9, ]*)')]
-
-
+setting_shells = [0,re.compile('^; bottom_shell_layers = ([0-9]*)')]
+setting_speed = [0,re.compile('^; inner_wall_speed = ([0-9]*)')]
+setting_bed_temp = [0,re.compile('^; first_layer_bed_temperature = ([0-9]*)')]
+setting_temps = [0,re.compile('^; nozzle_temperature = ([0-9, ]*)')]
 
 matching_hours = re.compile('([0-9]+)h')
 matching_minutes = re.compile('([0-9]+)m')
@@ -65,7 +63,7 @@ header_hex.append(bytes.fromhex("B0380000")) # 32bit constant #4 = 14512 -> star
 print_time_in_seconds = 0 #0x1C - 4 bytes
 filament_usage_in_mm_right = 0 #0x20 - 4 bytes
 filament_usage_in_mm_left = 0 #0x24 - 4 bytes
-extruder_mode = 3 # 0x28 - 2 bytes # 3 is normal, 19 is duplicate, 35 is mirror
+extruder_mode = 5 # 0x28 - 2 bytes # 3 is normal, 19 is duplicate, 35 is mirror
 layer_height_microns = 0 #0x2a - 2 bytes
 number_perimeter_shells = 0 #0x2e - 2 bytes
 print_speed = 0 # 0x30 - 2 bytes
@@ -220,8 +218,6 @@ for linenumber,line in enumerate(file_data_lines):
             continue
 
 
-
-
 #print("Going through list in reverse!")
 
 file_data_lines.reverse() 
@@ -239,15 +235,12 @@ for linenumber,line in enumerate(file_data_lines):
         #sys.stderr.write(str(new_percent)+"%" + " Regex Status: " + str(setting_print_time[0]) + " " + str(setting_filament_usage[0]) + " " + str(setting_temps[0]) + " " + str(setting_layer_height[0]) + " " + str(setting_shells[0]) + " " + str(setting_speed[0]) + " " + str(setting_bed_temp[0]) + "\n")
         sys.stderr.flush()
     
-    
     #short-circuit iteration if we're all done.
     if all([setting_print_time[0] , setting_filament_usage[0] , setting_temps[0] , setting_layer_height[0] , setting_shells[0] , setting_speed[0] , setting_bed_temp[0] ]):
         sys.stderr.write('\r') #clear last percent print
         sys.stderr.write("100%")
         sys.stderr.flush()  
         break
-
-
 
     if not setting_print_time[0] and setting_print_time[1].match(line):
         setting_print_time[0] = True
@@ -324,10 +317,6 @@ for linenumber,line in enumerate(file_data_lines):
         platform_temp = int(setting_bed_temp[1].match(line).group(1))
         continue
 
-    
-
-
-
 print() #so the next line comes out cleanly    
 #fileinput.close() # ensure it is closed, so that we can read to it in binary mode
 # since we store the data in memory, and did not write back, file is empty, easy to prepend header
@@ -361,7 +350,8 @@ header_hex.extend([
         right_extruder_temp, #x34 - h
         left_extruder_temp, #x36 - h
     ),
-    bytes.fromhex("FEFE") # Unknown, but seems to be a constant in all my demo files
+    bytes.fromhex("01FF") # Unknown, but seems to be a constant in all my demo files
+    #bytes.fromhex("FEFE") # Unknown, but seems to be a constant in all my demo files
 ]) #after this we should be at next space should be at 3A which is the starting point for our image
 
 
@@ -1058,7 +1048,6 @@ calPad_content = """;calPad A start Z0.20
 ;calPad SB end
 M109"""
 
-
 our_file = open(input_filename, 'wb') #since the output filename may be different (see above), use WRITE only.
 for binary_data in header_hex:
     our_file.write(binary_data)
@@ -1066,5 +1055,11 @@ our_file.write("\n".encode('utf-8')) #force it onto a newline
 if use_calpads: #only required for ditto and mirror
     file_data = file_data.replace("M109", calPad_content, 1)
 
-our_file.write(file_data.encode('utf-8')) # add the actual gcode for the printer
+#our_file.write(file_data.encode('utf-8')) # add the actual gcode for the printer
+for line in file_data.splitlines():  # แยก file_data เป็นบรรทัด
+    if "EXECUTABLE_BLOCK_END" in line:
+        our_file.write(line.encode('utf-8') + b"\n")  # เขียน EXECUTABLE_BLOCK_END ลงไป
+        break  # หยุดการเขียนหลังจาก EXECUTABLE_BLOCK_END
+    our_file.write(line.encode('utf-8') + b"\n")  # เขียนบรรทัดลงไฟล์
+    
 our_file.close()
